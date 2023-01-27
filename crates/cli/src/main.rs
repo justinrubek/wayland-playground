@@ -3,6 +3,9 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle, globals::{GlobalListContents, registry_queue_init},
 };
 
+mod error;
+mod window;
+
 struct AppState;
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for AppState {

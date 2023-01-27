@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.68"
 smithay-client-toolkit = "0.16.0"
+thiserror = "1.0.38"
 wayland-client = "0.30.0"
 # clap = { version = "4.0.19", features = ["derive"] }
 # reqwest = { version = "0.11.12", features = ["rustls-tls"] }
