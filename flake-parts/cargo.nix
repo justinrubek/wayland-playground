@@ -88,6 +88,7 @@
 
     extraBuildInputs = [
       pkgs.pkg-config
+      pkgs.libxkbcommon
     ];
     extraNativeBuildInputs = [
     ];
