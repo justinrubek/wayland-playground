@@ -7,19 +7,6 @@ use smithay_client_toolkit::reexports::client::{
 };
 use smithay_client_toolkit::shell::xdg::window::Window;
 use smithay_client_toolkit::shm::slot::SlotPool;
-use smithay_client_toolkit::{
-    compositor::CompositorState,
-    output::OutputState,
-    registry::RegistryState,
-    seat::SeatState,
-    shell::xdg::{
-        window::XdgWindowState,
-        XdgShellState,
-    },
-    shm::{
-        ShmState,
-    },
-};
 
 mod error;
 mod window;
@@ -41,29 +28,11 @@ fn main() -> AppResult<()> {
 
     println!("Globals: {:?}", globals.contents());
     // let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=5, ()).unwrap();
-    let mut simple_window = SimpleWindow {
-        registry_state: RegistryState::new(&globals),
-        seat_state: SeatState::new(&globals, &qh),
-        output_state: OutputState::new(&globals, &qh),
-        compositor_state: CompositorState::bind(&globals, &qh)
-            .expect("wl_compositor not available"),
-        shm_state: ShmState::bind(&globals, &qh).expect("wl_shm not available"),
-        xdg_shell_state: XdgShellState::bind(&globals, &qh).expect("xdg shell not available"),
-        xdg_window_state: XdgWindowState::bind(&globals, &qh),
-
-        exit: false,
-        first_configure: true,
-        pool: None,
-        width: 256,
-        height: 256,
-        shift: None,
-        buffer: None,
-        window: None,
-        keyboard: None,
-        keyboard_focus: false,
-        pointer: None,
-        loop_handle: event_loop.handle(),
-    };
+    let mut simple_window = SimpleWindow::init(
+        &globals,
+        &qh,
+        event_loop.handle(),
+    );
 
     let pool = SlotPool::new(
         simple_window.width as usize * simple_window.height as usize * 4,

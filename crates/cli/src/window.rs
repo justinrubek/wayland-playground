@@ -7,7 +7,9 @@ use smithay_client_toolkit::{
     reexports::{
         client::{
             protocol::{wl_output, wl_seat, wl_shm, wl_surface},
+            globals::GlobalList,
             Connection,
+            QueueHandle,
         },
     },
     registry::{ProvidesRegistryState, RegistryState},
@@ -29,7 +31,6 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     protocol::{wl_keyboard, wl_pointer},
-    QueueHandle,
 };
 
 pub(crate) struct SimpleWindow {
@@ -56,6 +57,36 @@ pub(crate) struct SimpleWindow {
 }
 
 impl SimpleWindow {
+    pub fn init(
+        globals: &GlobalList,
+        qh: &QueueHandle<Self>,
+        loop_handle: LoopHandle<'static, SimpleWindow>,
+    ) -> Self {
+        SimpleWindow {
+            registry_state: RegistryState::new(globals),
+            seat_state: SeatState::new(globals, qh),
+            output_state: OutputState::new(globals, qh),
+            compositor_state: CompositorState::bind(globals, qh)
+                .expect("wl_compositor not available"),
+            shm_state: ShmState::bind(globals, qh).expect("wl_shm not available"),
+            xdg_shell_state: XdgShellState::bind(globals, qh).expect("xdg shell not available"),
+            xdg_window_state: XdgWindowState::bind(globals, qh),
+
+            exit: false,
+            first_configure: true,
+            pool: None,
+            width: 256,
+            height: 256,
+            shift: None,
+            buffer: None,
+            window: None,
+            keyboard: None,
+            keyboard_focus: false,
+            pointer: None,
+            loop_handle,
+        }
+    }
+
     pub fn draw(&mut self, _conn: &Connection, qh: &QueueHandle<Self>) {
         if let Some(window) = self.window.as_ref() {
             let width = self.width;
