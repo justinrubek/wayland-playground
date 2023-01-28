@@ -2,13 +2,15 @@ use thiserror::Error;
 use smithay_client_toolkit::reexports::{
     calloop::Error as CalloopError,
     client::{
-        globals::GlobalError,
+        globals::{BindError, GlobalError},
         ConnectError,
     },
 };
 
 #[derive(Error, Debug)]
 pub enum AppError {
+    #[error(transparent)]
+    Bind(#[from] BindError),
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]

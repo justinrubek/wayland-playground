@@ -89,6 +89,7 @@
     extraBuildInputs = [
       pkgs.pkg-config
       pkgs.libxkbcommon
+      pkgs.wayland
     ];
     extraNativeBuildInputs = [
     ];
