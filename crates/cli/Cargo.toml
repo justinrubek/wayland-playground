@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.68"
-smithay-client-toolkit = { git = "https://github.com/smithay/client-toolkit", rev = "beefe0a" }
+smithay-client-toolkit = "0.17.0"
 thiserror = "1.0.38"
+tracing = { workspace = true }
+tracing-subscriber = "0.3.16"
 wayland-client = "0.30.0"
 # clap = { version = "4.0.19", features = ["derive"] }
 # reqwest = { version = "0.11.12", features = ["rustls-tls"] }

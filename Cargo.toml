@@ -2,6 +2,15 @@
 members = ["crates/*"]
 resolver = "2"
 
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+homepage = "https://github.com/justinrubek/lockpad"
+repository = "https://github.com/justinrubek/lockpad"
+
+[workspace.dependencies]
+tracing = "0.1.37"
+
 [profile.release]
 # opt-level = 2 # fast and small wasm
-

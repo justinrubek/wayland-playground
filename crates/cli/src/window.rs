@@ -1,16 +1,13 @@
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
+    compositor::CompositorHandler,
     delegate_compositor, delegate_keyboard, delegate_output, delegate_pointer, delegate_registry,
     delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window,
     output::{OutputHandler, OutputState},
     reexports::calloop::LoopHandle,
-    reexports::{
-        client::{
-            protocol::{wl_output, wl_seat, wl_shm, wl_surface},
-            globals::GlobalList,
-            Connection,
-            QueueHandle,
-        },
+    reexports::client::{
+        globals::GlobalList,
+        protocol::{wl_output, wl_seat, wl_shm, wl_surface},
+        Connection, QueueHandle,
     },
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -19,37 +16,30 @@ use smithay_client_toolkit::{
         pointer::{PointerEvent, PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
-    shell::xdg::{
-        window::{Window, WindowConfigure, WindowHandler, XdgWindowState},
-        XdgShellState,
+    shell::{
+        xdg::window::{Window, WindowConfigure, WindowHandler},
+        WaylandSurface,
     },
-    shm::ShmHandler,
-    shm::{
-        slot::{Buffer, SlotPool},
-        ShmState,
-    },
+    shm::slot::{Buffer, SlotPool},
+    shm::{Shm, ShmHandler},
 };
-use wayland_client::{
-    protocol::{wl_keyboard, wl_pointer},
-};
+use tracing::info;
+use wayland_client::protocol::{wl_keyboard, wl_pointer};
 
 pub(crate) struct SimpleWindow {
     pub(crate) registry_state: RegistryState,
     pub(crate) seat_state: SeatState,
     pub(crate) output_state: OutputState,
-    pub(crate) compositor_state: CompositorState,
-    pub(crate) shm_state: ShmState,
-    pub(crate) xdg_shell_state: XdgShellState,
-    pub(crate) xdg_window_state: XdgWindowState,
+    pub(crate) shm: Shm,
 
     pub(crate) exit: bool,
     pub(crate) first_configure: bool,
-    pub(crate) pool: Option<SlotPool>,
+    pub(crate) pool: SlotPool,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) shift: Option<u32>,
     pub(crate) buffer: Option<Buffer>,
-    pub(crate) window: Option<Window>,
+    pub(crate) window: Window,
     pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     pub(crate) keyboard_focus: bool,
     pub(crate) pointer: Option<wl_pointer::WlPointer>,
@@ -61,25 +51,24 @@ impl SimpleWindow {
         globals: &GlobalList,
         qh: &QueueHandle<Self>,
         loop_handle: LoopHandle<'static, SimpleWindow>,
+        shm: Shm,
+        pool: SlotPool,
+        window: Window,
     ) -> Self {
         SimpleWindow {
             registry_state: RegistryState::new(globals),
             seat_state: SeatState::new(globals, qh),
             output_state: OutputState::new(globals, qh),
-            compositor_state: CompositorState::bind(globals, qh)
-                .expect("wl_compositor not available"),
-            shm_state: ShmState::bind(globals, qh).expect("wl_shm not available"),
-            xdg_shell_state: XdgShellState::bind(globals, qh).expect("xdg shell not available"),
-            xdg_window_state: XdgWindowState::bind(globals, qh),
+            shm,
 
             exit: false,
             first_configure: true,
-            pool: None,
+            pool,
             width: 256,
             height: 256,
             shift: None,
             buffer: None,
-            window: None,
+            window,
             keyboard: None,
             keyboard_focus: false,
             pointer: None,
@@ -88,81 +77,81 @@ impl SimpleWindow {
     }
 
     pub fn draw(&mut self, _conn: &Connection, qh: &QueueHandle<Self>) {
-        if let Some(window) = self.window.as_ref() {
-            let width = self.width;
-            let height = self.height;
-            let stride = self.width as i32 * 4;
-            let pool = self.pool.as_mut().unwrap();
+        let width = self.width;
+        let height = self.height;
+        let stride = self.width as i32 * 4;
 
-            let buffer = self.buffer.get_or_insert_with(|| {
-                pool.create_buffer(
+        let buffer = self.buffer.get_or_insert_with(|| {
+            self.pool
+                .create_buffer(
                     width as i32,
                     height as i32,
                     stride,
                     wl_shm::Format::Argb8888,
                 )
-                .expect("create buffer")
+                .expect("Failed to create buffer")
                 .0
-            });
+        });
 
-            let canvas = match pool.canvas(buffer) {
-                Some(canvas) => canvas,
-                None => {
-                    // This should be rare, but if the compositor has not released the previous
-                    // buffer, we need double-buffering.
-                    let (second_buffer, canvas) = pool
-                        .create_buffer(
-                            self.width as i32,
-                            self.height as i32,
-                            stride,
-                            wl_shm::Format::Argb8888,
-                        )
-                        .expect("create buffer");
-                    *buffer = second_buffer;
-                    canvas
-                }
-            };
-
-            // Draw to the window:
-            {
-                let shift = self.shift.unwrap_or(0);
+        let canvas = match self.pool.canvas(buffer) {
+            Some(canvas) => canvas,
+            None => {
+                // this should be rare, but if the compositor has not released the previous buffer,
+                // we need double-buffering
+                let (second_buffer, canvas) = self
+                    .pool
+                    .create_buffer(
+                        self.width as i32,
+                        self.height as i32,
+                        stride,
+                        wl_shm::Format::Argb8888,
+                    )
+                    .expect("Failed to create buffer");
+                *buffer = second_buffer;
                 canvas
-                    .chunks_exact_mut(4)
-                    .enumerate()
-                    .for_each(|(index, chunk)| {
-                        let x = ((index + shift as usize) % width as usize) as u32;
-                        let y = (index / width as usize) as u32;
-
-                        let a = 0xFF;
-                        let r =
-                            u32::min(((width - x) * 0xFF) / width, ((height - y) * 0xFF) / height);
-                        let g = u32::min((x * 0xFF) / width, ((height - y) * 0xFF) / height);
-                        let b = u32::min(((width - x) * 0xFF) / width, (y * 0xFF) / height);
-                        let color = (a << 24) + (r << 16) + (g << 8) + b;
-
-                        let array: &mut [u8; 4] = chunk.try_into().unwrap();
-                        *array = color.to_le_bytes();
-                    });
-
-                if let Some(shift) = &mut self.shift {
-                    *shift = (*shift + 1) % width;
-                }
             }
+        };
 
-            // Damage the entire window
-            window
-                .wl_surface()
-                .damage_buffer(0, 0, self.width as i32, self.height as i32);
+        // draw to the window
+        {
+            let shift = self.shift.unwrap_or(0);
+            canvas
+                .chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(index, chunk)| {
+                    let x = ((index + shift as usize) % width as usize) as u32;
+                    let y = (index / width as usize) as u32;
 
-            // Request our next frame
-            window.wl_surface().frame(qh, window.wl_surface().clone());
+                    let a = 0xFF;
+                    let r = u32::min(((width - x) * 0xFF) / width, ((height - y) * 0xFF) / height);
+                    let g = u32::min((x * 0xFF) / width, ((height - y) * 0xFF) / height);
+                    let b = u32::min(((width - x) * 0xFF) / width, (y * 0xFF) / height);
+                    let color = (a << 24) + (r << 16) + (g << 8) + b;
 
-            // Attach and commit to present.
-            buffer
-                .attach_to(window.wl_surface())
-                .expect("buffer attach");
-            window.wl_surface().commit();
+                    let array: &mut [u8; 4] = chunk.try_into().unwrap();
+                    *array = color.to_le_bytes();
+                });
+
+            if let Some(shift) = &mut self.shift {
+                *shift = (*shift + 1) % width;
+            }
         }
+
+        // damage the entire window
+        self.window
+            .wl_surface()
+            .damage_buffer(0, 0, self.width as i32, self.height as i32);
+
+        // request next frame
+        self.window
+            .wl_surface()
+            .frame(qh, self.window.wl_surface().clone());
+
+        // attach and commit to present
+        buffer
+            .attach_to(self.window.wl_surface())
+            .expect("Failed to attach buffer");
+        self.window.commit();
     }
 }
 
@@ -219,8 +208,8 @@ impl OutputHandler for SimpleWindow {
 }
 
 impl ShmHandler for SimpleWindow {
-    fn shm_state(&mut self) -> &mut ShmState {
-        &mut self.shm_state
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
     }
 }
 
@@ -239,21 +228,25 @@ impl SeatHandler for SimpleWindow {
         capability: Capability,
     ) {
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            println!("Set keyboard capability");
-            let (keyboard, source) = self
+            info!("Set keyboard capability");
+            let keyboard = self
                 .seat_state
-                .get_keyboard_with_repeat(qh, &seat, None)
+                .get_keyboard_with_repeat(
+                    qh,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(|_state, _wl_kbd, event| {
+                        info!("repeat: {event:?}");
+                    }),
+                )
                 .expect("Failed to create keyboard");
-            self.loop_handle
-                .insert_source(source, |e, _, _state| {
-                    dbg!(e);
-                })
-                .expect("Failed to insert the repeating keyboard into the event loop");
+
             self.keyboard = Some(keyboard);
         }
 
         if capability == Capability::Pointer && self.pointer.is_none() {
-            println!("Set pointer capability");
+            info!("Set pointer capability");
             let pointer = self
                 .seat_state
                 .get_pointer(qh, &seat)
@@ -270,12 +263,12 @@ impl SeatHandler for SimpleWindow {
         capability: Capability,
     ) {
         if capability == Capability::Keyboard && self.keyboard.is_some() {
-            println!("Unset keyboard capability");
+            info!("Unset keyboard capability");
             self.keyboard.take().unwrap().release();
         }
 
         if capability == Capability::Pointer && self.pointer.is_some() {
-            println!("Unset pointer capability");
+            info!("Unset pointer capability");
             self.pointer.take().unwrap().release();
         }
     }
@@ -294,8 +287,8 @@ impl KeyboardHandler for SimpleWindow {
         _: &[u32],
         keysyms: &[u32],
     ) {
-        if self.window.as_ref().map(Window::wl_surface) == Some(surface) {
-            println!("Keyboard focus on window with pressed syms: {keysyms:?}");
+        if self.window.wl_surface() == surface {
+            info!("Keyboard focus on window with pressed syms: {keysyms:?}");
             self.keyboard_focus = true;
         }
     }
@@ -308,8 +301,8 @@ impl KeyboardHandler for SimpleWindow {
         surface: &wl_surface::WlSurface,
         _: u32,
     ) {
-        if self.window.as_ref().map(Window::wl_surface) == Some(surface) {
-            println!("Release keyboard focus on window");
+        if self.window.wl_surface() == surface {
+            info!("Release keyboard focus on window");
             self.keyboard_focus = false;
         }
     }
@@ -322,7 +315,7 @@ impl KeyboardHandler for SimpleWindow {
         _: u32,
         event: KeyEvent,
     ) {
-        println!("Key press: {event:?}");
+        info!("Key press: {event:?}");
     }
 
     fn release_key(
@@ -333,7 +326,7 @@ impl KeyboardHandler for SimpleWindow {
         _: u32,
         event: KeyEvent,
     ) {
-        println!("Key release: {event:?}");
+        info!("Key release: {event:?}");
     }
 
     fn update_modifiers(
@@ -344,7 +337,7 @@ impl KeyboardHandler for SimpleWindow {
         _serial: u32,
         modifiers: Modifiers,
     ) {
-        println!("Update modifiers: {modifiers:?}");
+        info!("Update modifiers: {modifiers:?}");
     }
 }
 
@@ -359,31 +352,31 @@ impl PointerHandler for SimpleWindow {
         use PointerEventKind::*;
         for event in events {
             // Ignore events for other surfaces
-            if Some(&event.surface) != self.window.as_ref().map(Window::wl_surface) {
+            if &event.surface != self.window.wl_surface() {
                 continue;
             }
 
             match event.kind {
                 Enter { .. } => {
-                    println!("Pointer entered @{:?}", event.position);
+                    info!("Pointer entered @{:?}", event.position);
                 }
                 Leave { .. } => {
-                    println!("Pointer left");
+                    info!("Pointer left");
                 }
                 Motion { .. } => {}
                 Press { button, .. } => {
-                    println!("Press {:x} @ {:?}", button, event.position);
+                    info!("Press {:x} @ {:?}", button, event.position);
                     self.shift = self.shift.xor(Some(0));
                 }
                 Release { button, .. } => {
-                    println!("Release {:x} @ {:?}", button, event.position);
+                    info!("Release {:x} @ {:?}", button, event.position);
                 }
                 Axis {
                     horizontal,
                     vertical,
                     ..
                 } => {
-                    println!("Scroll H:{horizontal:?}, V:{vertical:?}");
+                    info!("Scroll H:{horizontal:?}, V:{vertical:?}");
                 }
             }
         }
@@ -403,18 +396,9 @@ impl WindowHandler for SimpleWindow {
         configure: WindowConfigure,
         _serial: u32,
     ) {
-        match configure.new_size {
-            Some(size) => {
-                self.width = size.0;
-                self.height = size.1;
-                self.buffer = None;
-            }
-            None => {
-                self.width = 256;
-                self.height = 256;
-                self.buffer = None;
-            }
-        }
+        self.buffer = None;
+        self.width = configure.new_size.0.map(|v| v.get()).unwrap_or(256);
+        self.height = configure.new_size.1.map(|v| v.get()).unwrap_or(256);
 
         // Initiate the first draw.
         if self.first_configure {
