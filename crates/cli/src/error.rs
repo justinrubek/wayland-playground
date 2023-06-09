@@ -1,11 +1,8 @@
-use thiserror::Error;
 use smithay_client_toolkit::reexports::{
     calloop::Error as CalloopError,
-    client::{
-        globals::GlobalError,
-        ConnectError,
-    },
+    client::{globals::GlobalError, ConnectError},
 };
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -17,6 +14,8 @@ pub enum AppError {
     Global(#[from] GlobalError),
     #[error(transparent)]
     Calloop(#[from] CalloopError),
+    #[error(transparent)]
+    Dispatch(#[from] wayland_client::DispatchError),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

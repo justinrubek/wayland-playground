@@ -55,6 +55,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wayland-client",
+ "xkbcommon",
 ]
 
 [[package]]
