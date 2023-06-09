@@ -17,9 +17,7 @@ mod window;
 use crate::error::AppResult;
 use crate::window::SimpleWindow;
 
-fn main() -> AppResult<()> {
-    tracing_subscriber::fmt::init();
-
+fn simple_window() -> AppResult<()> {
     let connection = Connection::connect_to_env()?;
 
     let (globals, queue) = registry_queue_init(&connection)?;
@@ -57,4 +55,10 @@ fn main() -> AppResult<()> {
     }
 
     Ok(())
+}
+
+fn main() -> AppResult<()> {
+    tracing_subscriber::fmt::init();
+
+    simple_window()
 }
